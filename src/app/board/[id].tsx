@@ -20,38 +20,47 @@ export default function BoardRoute() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'missing'>('loading');
 
   useEffect(() => {
+    // If the id changes before this finishes, drop the stale result.
+    let cancelled = false;
+
+    async function load() {
+      const [{ data: sheet }, { data: userData }] = await Promise.all([
+        supabase
+          .from('task_sheets')
+          .select('id, name, type, caching_enabled, owner_id')
+          .eq('id', id)
+          .maybeSingle(),
+        supabase.auth.getUser(),
+      ]);
+      if (cancelled) return;
+
+      // RLS returns nothing for boards you can't access, same as a deleted one.
+      if (!sheet) {
+        setStatus('missing');
+        return;
+      }
+
+      let premium = false;
+      if (userData.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('is_premium')
+          .eq('id', userData.user.id)
+          .maybeSingle();
+        premium = profile?.is_premium ?? false;
+      }
+      if (cancelled) return;
+
+      setIsPremium(premium);
+      setBoard(sheet);
+      setStatus('ready');
+    }
+
     load();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
-
-  async function load() {
-    setStatus('loading');
-    const [{ data: sheet }, { data: userData }] = await Promise.all([
-      supabase
-        .from('task_sheets')
-        .select('id, name, type, caching_enabled, owner_id')
-        .eq('id', id)
-        .maybeSingle(),
-      supabase.auth.getUser(),
-    ]);
-
-    // RLS returns nothing for boards you can't access, same as a deleted one.
-    if (!sheet) {
-      setStatus('missing');
-      return;
-    }
-
-    if (userData.user) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('is_premium')
-        .eq('id', userData.user.id)
-        .maybeSingle();
-      setIsPremium(profile?.is_premium ?? false);
-    }
-
-    setBoard(sheet);
-    setStatus('ready');
-  }
 
   function goBack() {
     if (router.canGoBack()) router.back();
@@ -69,7 +78,7 @@ export default function BoardRoute() {
   if (status === 'missing' || !board) {
     return (
       <View style={styles.center}>
-        <Text style={styles.missingTitle}>This board isn't available</Text>
+        <Text style={styles.missingTitle}>This board isn’t available</Text>
         <Text style={styles.missingText}>It may have been deleted, or you no longer have access.</Text>
         <Pressable onPress={goBack} hitSlop={10}>
           <Text style={styles.backText}>‹ Boards</Text>

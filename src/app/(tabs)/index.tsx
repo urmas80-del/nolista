@@ -149,7 +149,7 @@ export default function Home() {
   if (loadError && boards.length === 0) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>Couldn't load your boards.</Text>
+        <Text style={styles.errorText}>Couldn’t load your boards.</Text>
         <Text style={styles.subtitle}>{loadError}</Text>
         <Pressable
           onPress={() => {

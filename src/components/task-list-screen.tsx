@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
 import ShareModal from '@/components/share-modal';
 import { friendlyError } from '@/utils/errors';
+import { removeById, upsertById } from '@/utils/task-list';
 import { supabase } from '../../lib/supabase';
 
 type Task = {
@@ -82,7 +83,6 @@ export default function TaskListScreen({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(board.name);
   const [myId, setMyId] = useState<string | null>(null);
-  const latestQuery = useRef('');
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -125,49 +125,48 @@ export default function TaskListScreen({
   }, [board.id]);
 
   function upsertTask(row: Task) {
-    setTasks((current) =>
-      current.some((t) => t.id === row.id)
-        ? current.map((t) => (t.id === row.id ? row : t))
-        : [...current, row]
-    );
+    setTasks((current) => upsertById(current, row));
   }
 
   function removeTask(id: string) {
-    setTasks((current) => current.filter((t) => t.id !== id));
+    setTasks((current) => removeById(current, id));
   }
+
+  const query = newTitle.trim();
+  const suggestionsEnabled = !!board.caching_enabled && query.length > 0;
+  // Derived instead of cleared in an effect: nothing typed means no suggestions.
+  const visibleSuggestions = suggestionsEnabled ? suggestions : [];
 
   useEffect(() => {
-    const text = newTitle.trim();
-    latestQuery.current = text;
+    if (!suggestionsEnabled) return;
 
-    if (!board.caching_enabled || text.length === 0) {
-      setSuggestions([]);
-      return;
-    }
-    const timeout = setTimeout(() => fetchSuggestions(text), 150);
-    return () => clearTimeout(timeout);
-  }, [newTitle]);
+    // A newer keystroke cancels this request, so results can't arrive out of order.
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      // Escape LIKE wildcards so typing "%" or "_" matches literally.
+      const prefix = query.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`);
+      const { data, error } = await supabase
+        .from('board_item_cache')
+        .select('id, item_name, use_count')
+        .eq('sheet_id', board.id)
+        .ilike('normalized_name', `${prefix}%`)
+        .order('use_count', { ascending: false })
+        .order('last_used_at', { ascending: false })
+        .limit(5);
 
-  async function fetchSuggestions(text: string) {
-    const normalized = text.toLowerCase();
-    const { data, error } = await supabase
-      .from('board_item_cache')
-      .select('id, item_name, use_count')
-      .eq('sheet_id', board.id)
-      .ilike('normalized_name', `${normalized}%`)
-      .order('use_count', { ascending: false })
-      .order('last_used_at', { ascending: false })
-      .limit(5);
-
-    if (error) {
-      console.log('fetchSuggestions error:', error.message);
-      return;
-    }
-
-    if (latestQuery.current === text) {
+      if (cancelled) return;
+      if (error) {
+        console.log('fetchSuggestions error:', error.message);
+        return;
+      }
       setSuggestions(data ?? []);
-    }
-  }
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [query, suggestionsEnabled, board.id]);
 
   async function deleteSuggestion(s: Suggestion) {
     setSuggestions((current) => current.filter((item) => item.id !== s.id));
@@ -451,9 +450,9 @@ export default function TaskListScreen({
         />
       )}
 
-      {suggestions.length > 0 && (
+      {visibleSuggestions.length > 0 && (
         <View style={styles.suggestList}>
-          {suggestions.map((s) => (
+          {visibleSuggestions.map((s) => (
             <View key={s.id} style={styles.suggestRow}>
               <Pressable style={styles.suggestMain} onPress={() => addTask(s.item_name)}>
                 <Text style={styles.suggestName}>{s.item_name}</Text>

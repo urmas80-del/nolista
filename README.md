@@ -72,3 +72,34 @@ supabase/                migrations and SQL tools
 | `npm start` | Start the Expo dev server |
 | `npm run typecheck` | TypeScript check (`tsc --noEmit`) |
 | `npm run lint` | ESLint via `expo lint` |
+| `npm test` | Unit tests (Jest, `__tests__/*-test.ts`) |
+| `npm run test:watch` | Tests in watch mode |
+
+GitHub Actions runs typecheck, lint and tests on every pull request and
+push to `main` (`.github/workflows/ci.yml`).
+
+## Builds (EAS)
+
+Expo Go shows its own icon and splash. To see the real app (icon, splash,
+native modules), make a build with [EAS](https://docs.expo.dev/build/introduction/).
+
+One-time setup:
+
+```bash
+npm install -g eas-cli
+eas login
+eas init                                  # links the project, adds its ID to app.json
+# .env is not uploaded to EAS, so store the two public values there:
+eas env:create --name EXPO_PUBLIC_SUPABASE_URL --value https://<ref>.supabase.co \
+  --environment development --environment preview --environment production --visibility plaintext
+eas env:create --name EXPO_PUBLIC_SUPABASE_ANON_KEY --value <publishable key> \
+  --environment development --environment preview --environment production --visibility plaintext
+```
+
+| Profile | Command | Use it for |
+|---|---|---|
+| `development` | `eas build -p android --profile development` | Your own dev client; run `npx expo start` and open it instead of Expo Go |
+| `preview` | `eas build -p android --profile preview` | An installable APK to share with testers |
+| `production` | `eas build -p android --profile production` | Store build (AAB); `eas submit` uploads it |
+
+iOS builds need an Apple Developer account.
