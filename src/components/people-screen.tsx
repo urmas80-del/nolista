@@ -69,8 +69,17 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
 
   async function removeFromBoard(email: string, boardId: string) {
     const { data: profile } = await supabase.from('profiles').select('id').eq('email', email).maybeSingle();
-    if (!profile) return;
-    await supabase.from('sheet_collaborators').delete().eq('sheet_id', boardId).eq('user_id', profile.id);
+    if (!profile) {
+      Alert.alert('Could not remove', `${email} wasn't found on this board.`);
+      load();
+      return;
+    }
+    const { error } = await supabase
+      .from('sheet_collaborators')
+      .delete()
+      .eq('sheet_id', boardId)
+      .eq('user_id', profile.id);
+    if (error) Alert.alert('Could not remove', friendlyError(error));
     load();
   }
 
@@ -86,7 +95,7 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
           onPress: async () => {
             const { error } = await supabase.rpc('remove_known_user', { p_contact_email: email });
             if (error) {
-              console.log('remove_known_user error:', error.message);
+              Alert.alert(`Could not remove ${email}`, friendlyError(error));
               return;
             }
             load();

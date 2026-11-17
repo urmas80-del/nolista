@@ -4,6 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ACCENTS } from '@/constants/boards';
+import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../../lib/supabase';
 
 type Board = {
@@ -29,30 +30,23 @@ export default function Settings() {
     const { data: userData } = await supabase.auth.getUser();
     setMyId(userData.user?.id ?? null);
 
-    const { data: sheets } = await supabase
-      .from('task_sheets')
-      .select('id, name, type, owner_id')
+    const { data, error } = await supabase
+      .from('board_summaries')
+      .select('id, name, type, owner_id, collaborator_count')
       .order('created_at', { ascending: true });
 
-    if (!sheets) return;
+    if (error) {
+      Alert.alert('Could not load boards', friendlyError(error));
+      return;
+    }
 
-    const withCounts = await Promise.all(
-      sheets.map(async (sheet) => {
-        const { count } = await supabase
-          .from('sheet_collaborators')
-          .select('id', { count: 'exact', head: true })
-          .eq('sheet_id', sheet.id);
-        return { ...sheet, collaborator_count: count ?? 0 };
-      })
-    );
-
-    setBoards(withCounts);
+    setBoards(data ?? []);
   }
 
   async function clearHistory(board: Board) {
     const { error } = await supabase.from('board_item_cache').delete().eq('sheet_id', board.id);
     if (error) {
-      console.log('clearHistory error:', error.message);
+      Alert.alert('Could not clear history', friendlyError(error));
       return;
     }
     Alert.alert('Cleared', `${board.name}'s suggestion history has been cleared.`);
@@ -84,14 +78,14 @@ export default function Settings() {
     setBoards((current) => current.filter((b) => b.id !== board.id));
     const { error } = await supabase.from('task_sheets').delete().eq('id', board.id);
     if (error) {
-      console.log('deleteBoard error:', error.message);
-      Alert.alert('Could not delete board', error.message);
+      Alert.alert('Could not delete board', friendlyError(error));
       loadBoards();
     }
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) Alert.alert('Could not sign out', friendlyError(error));
   }
 
   const cacheableBoards = boards.filter((b) => b.type === 'market' || b.type === 'custom');

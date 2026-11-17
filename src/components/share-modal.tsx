@@ -91,7 +91,11 @@ export default function ShareModal({
 
   async function revokeInvite(inviteId: string) {
     setInvites((current) => current.filter((i) => i.id !== inviteId));
-    await supabase.from('board_invites').delete().eq('id', inviteId);
+    const { error } = await supabase.from('board_invites').delete().eq('id', inviteId);
+    if (error) {
+      setErrorMsg(friendlyError(error));
+      load();
+    }
   }
 
   const alreadyEmails = new Set([

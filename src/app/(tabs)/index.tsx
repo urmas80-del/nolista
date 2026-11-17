@@ -31,6 +31,7 @@ export default function Home() {
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [isPremium, setIsPremium] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Runs on first show and every time you come back to Home (e.g. from a
   // board), so counts and names stay current.
@@ -56,46 +57,35 @@ export default function Home() {
   // The spinner only shows on first load (initial state); refreshes on focus
   // update the list in place.
   async function loadBoards() {
-    const { data: sheets, error } = await supabase
-      .from('task_sheets')
-      .select('id, name, type, caching_enabled, owner_id')
+    // One request: boards you own or joined, with counts (board_summaries view).
+    const { data, error } = await supabase
+      .from('board_summaries')
+      .select('id, name, type, caching_enabled, owner_id, total_count, done_count')
       .order('created_at', { ascending: true });
 
     if (error) {
-      console.log('loadBoards error:', error.message);
+      // Keep showing the last good list; only show the error state if empty.
+      setLoadError(friendlyError(error));
+    } else {
+      setLoadError(null);
+      setBoards(
+        (data ?? []).map((b) => ({
+          id: b.id,
+          name: b.name,
+          type: b.type,
+          caching_enabled: b.caching_enabled,
+          owner_id: b.owner_id,
+          totalCount: b.total_count ?? 0,
+          doneCount: b.done_count ?? 0,
+        }))
+      );
     }
-
-    if (error || !sheets) {
-      setLoading(false);
-      return;
-    }
-
-    const withCounts = await Promise.all(
-      sheets.map(async (sheet) => {
-        const { count: totalCount } = await supabase
-          .from('tasks')
-          .select('id', { count: 'exact', head: true })
-          .eq('sheet_id', sheet.id);
-        const { count: doneCount } = await supabase
-          .from('tasks')
-          .select('id', { count: 'exact', head: true })
-          .eq('sheet_id', sheet.id)
-          .eq('is_done', true);
-        return {
-          ...sheet,
-          totalCount: totalCount ?? 0,
-          doneCount: doneCount ?? 0,
-        };
-      })
-    );
-
-    setBoards(withCounts);
     setLoading(false);
   }
 
   async function loadInvites() {
     const { data: userData } = await supabase.auth.getUser();
-    const myEmail = userData.user?.email;
+    const myEmail = userData.user?.email?.toLowerCase();
     if (!myEmail) return;
 
     const { data, error } = await supabase
@@ -152,6 +142,24 @@ export default function Home() {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={Brand.colors.sprout} />
+      </View>
+    );
+  }
+
+  if (loadError && boards.length === 0) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorText}>Couldn't load your boards.</Text>
+        <Text style={styles.subtitle}>{loadError}</Text>
+        <Pressable
+          onPress={() => {
+            setLoading(true);
+            loadBoards();
+          }}
+          hitSlop={10}
+        >
+          <Text style={styles.newBoardText}>Try again</Text>
+        </Pressable>
       </View>
     );
   }
@@ -223,7 +231,8 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Brand.colors.stone, paddingTop: 60, paddingHorizontal: 22 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Brand.colors.stone },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: Brand.colors.stone },
+  errorText: { fontFamily: Brand.fonts.display, fontSize: 18, color: Brand.colors.ink },
   titleRow: { flexDirection: 'row', alignItems: 'center' },
   title: { fontFamily: Brand.fonts.displayItalic, fontSize: 30, color: Brand.colors.ink },
   subtitle: { fontFamily: Brand.fonts.body, fontSize: 13, color: Brand.colors.muted, marginTop: 4, marginBottom: 20 },

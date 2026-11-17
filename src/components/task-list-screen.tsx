@@ -173,7 +173,8 @@ export default function TaskListScreen({
     setSuggestions((current) => current.filter((item) => item.id !== s.id));
     const { error } = await supabase.from('board_item_cache').delete().eq('id', s.id);
     if (error) {
-      console.log('deleteSuggestion error:', error.message);
+      setSuggestions((current) => [s, ...current]);
+      Alert.alert('Could not remove suggestion', friendlyError(error));
     }
   }
 
@@ -186,7 +187,10 @@ export default function TaskListScreen({
       .order('created_at', { ascending: true });
 
     if (error) {
-      console.log('loadTasks error:', error.message);
+      // Silent refreshes keep the current list; a failed first load would
+      // look like an empty board, so say so.
+      if (showSpinner) Alert.alert('Could not load items', friendlyError(error));
+      else console.log('loadTasks error:', error.message);
     } else {
       setTasks(data ?? []);
     }
@@ -259,10 +263,11 @@ export default function TaskListScreen({
   }
 
   async function deleteTask(task: Task) {
-    setTasks((current) => current.filter((t) => t.id !== task.id));
+    removeTask(task.id);
     const { error } = await supabase.from('tasks').delete().eq('id', task.id);
     if (error) {
-      console.log('deleteTask error:', error.message);
+      Alert.alert('Could not delete item', friendlyError(error));
+      loadTasks(false); // put it back in its original position
     }
   }
 
@@ -303,8 +308,8 @@ export default function TaskListScreen({
       .eq('is_done', true);
 
     if (error) {
-      console.log('clearCompleted error:', error.message);
-      loadTasks();
+      Alert.alert('Could not clear completed items', friendlyError(error));
+      loadTasks(false);
     }
   }
 
@@ -324,8 +329,8 @@ export default function TaskListScreen({
     setTasks([]);
     const { error } = await supabase.from('tasks').delete().eq('sheet_id', board.id);
     if (error) {
-      console.log('clearList error:', error.message);
-      loadTasks();
+      Alert.alert('Could not clear the list', friendlyError(error));
+      loadTasks(false);
     }
   }
 
