@@ -55,7 +55,7 @@ export default function BoardRoute() {
 
   function goBack() {
     if (router.canGoBack()) router.back();
-    else router.replace('/(tabs)/index'); // opened from a deep link: no history
+    else router.replace('/'); // opened from a deep link: no history
   }
 
   if (status === 'loading') {

@@ -8,7 +8,9 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
@@ -81,6 +83,7 @@ export default function TaskListScreen({
   const [nameDraft, setNameDraft] = useState(board.name);
   const [myId, setMyId] = useState<string | null>(null);
   const latestQuery = useRef('');
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     loadTasks();
@@ -330,7 +333,12 @@ export default function TaskListScreen({
   const isOwner = board.owner_id === myId;
 
   return (
-    <View style={styles.container}>
+    // Expo apps are edge-to-edge on Android, so the window doesn't resize for
+    // the keyboard; padding keeps the add row above it on both platforms.
+    <KeyboardAvoidingView
+      behavior="padding"
+      style={[styles.container, { paddingTop: insets.top + 16 }]}
+    >
       <View style={styles.header}>
         <View style={styles.headerTopRow}>
           <Pressable onPress={onBack}>
@@ -488,7 +496,8 @@ export default function TaskListScreen({
         </View>
       )}
 
-      <View style={styles.addRow}>
+      {/* Keep the add row clear of the Android navigation bar / iOS home indicator. */}
+      <View style={[styles.addRow, { paddingBottom: 16 + insets.bottom }]}>
         <Pressable onPress={toggleRecurrencePicker} style={styles.repeatBtn}>
           <Ionicons
             name="repeat-outline"
@@ -515,12 +524,12 @@ export default function TaskListScreen({
         boardName={board.name}
         onClose={() => setShareOpen(false)}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Brand.colors.paper, paddingTop: 60 },
+  container: { flex: 1, backgroundColor: Brand.colors.paper },
   header: { paddingHorizontal: 22, marginBottom: 10, position: 'relative' },
   headerTopRow: {
     flexDirection: 'row',

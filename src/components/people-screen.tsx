@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, FlatList, TextInput, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, FlatList, TextInput, StyleSheet, Alert, KeyboardAvoidingView } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { friendlyError } from '@/utils/errors';
@@ -15,6 +16,7 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
   const [newEmail, setNewEmail] = useState('');
   const [newBoardIds, setNewBoardIds] = useState<string[]>([]);
   const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     load();
@@ -140,7 +142,10 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
   }
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      behavior="padding"
+      style={[styles.container, { paddingTop: insets.top + 16 }]}
+    >
       <Pressable onPress={onBack} style={{ marginBottom: 10 }}>
         <Text style={styles.backText}>‹ Home</Text>
       </Pressable>
@@ -150,7 +155,8 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
       <FlatList
         data={knownUsers}
         keyExtractor={(item) => item.email}
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 20 + insets.bottom }}
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => (
           <View style={styles.personCard}>
             <View style={styles.personRow}>
@@ -238,12 +244,12 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
           )
         }
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Brand.colors.paper, paddingTop: 60, paddingHorizontal: 22 },
+  container: { flex: 1, backgroundColor: Brand.colors.paper, paddingHorizontal: 22 },
   backText: { fontFamily: Brand.fonts.bodyBold, color: Brand.colors.sprout, fontSize: 15 },
   title: { fontFamily: Brand.fonts.display, fontSize: 24, color: Brand.colors.ink },
   subtitle: { fontFamily: Brand.fonts.body, fontSize: 12, color: Brand.colors.muted, marginTop: 4, marginBottom: 16 },
