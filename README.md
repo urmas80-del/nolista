@@ -1,56 +1,74 @@
-# Welcome to your Expo app 👋
+# Nolista
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Shared lists for families: a grocery list that remembers what you buy, a
+shared "together" board, a private focus list, and custom boards. Built with
+Expo (SDK 57, Expo Router) and Supabase.
 
-## Get started
+## Features
 
-1. Install dependencies
+- Email sign-in with a one-time code
+- Built-in boards (Market, Together, Focus) and Premium custom boards
+- Share boards by email; collaborators see changes live (Supabase Realtime)
+- Smart suggestions from items you've added before
+- Recurring items (Premium)
+- A "sharing circle" of people you share with
 
-   ```bash
-   npm install
-   ```
+## Getting started
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Requirements: Node.js 20+ (LTS), and Expo Go or an Android/iOS emulator.
 
 ```bash
-npm run reset-project
+npm install
+cp .env.example .env      # PowerShell: Copy-Item .env.example .env
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Fill in `.env` from the Supabase dashboard (**Project Settings → API**):
 
-### Other setup steps
+```
+EXPO_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<anon or sb_publishable_ key>
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Use the anon/publishable key only. Never put the `service_role` or
+`sb_secret_` key in the app.
 
-## Learn more
+```bash
+npx expo start            # then press a (Android), i (iOS) or w (web)
+npx expo start --clear    # after changing .env
+npx expo start --tunnel   # if your phone can't reach your computer
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## Database
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+The schema, security policies and functions live in
+[`supabase/migrations`](supabase/migrations). Every database change goes into
+a new migration file. See [`supabase/README.md`](supabase/README.md) for how
+to apply them.
 
-## Join the community
+Premium is a flag on `profiles.is_premium`; it can only be set from the
+Supabase dashboard (or the service role), not from the app.
 
-Join our community of developers creating universal apps.
+## Project layout
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```
+src/app/                 routes (Expo Router)
+  _layout.tsx            root stack; signed-in vs signed-out screens
+  sign-in.tsx
+  (tabs)/index.tsx       Home: your boards and pending invites
+  (tabs)/settings.tsx
+  board/[id].tsx         a board's items
+  people.tsx             your sharing circle
+src/components/          screens and modals used by the routes
+src/constants/           brand colours/fonts, board types
+src/utils/errors.ts      Supabase error -> user-facing message
+lib/supabase.js          Supabase client
+supabase/                migrations and SQL tools
+```
+
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm start` | Start the Expo dev server |
+| `npm run typecheck` | TypeScript check (`tsc --noEmit`) |
+| `npm run lint` | ESLint via `expo lint` |
