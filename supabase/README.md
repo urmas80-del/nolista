@@ -9,6 +9,7 @@ triggers) goes into a new migration file, never only into the dashboard.
 | `migrations/20261117000000_baseline.sql` | Production schema as of 2026-11-17. Already applied in production. |
 | `migrations/20261117000100_security_hardening.sql` | RLS and function fixes from the security review. |
 | `migrations/20261117000200_indexes.sql` | Indexes on foreign keys and invite lookups. |
+| `migrations/20261117000300_realtime_tasks.sql` | Publishes `tasks` to Realtime for live shared boards. |
 | `tools/inspect-schema.sql` | Read-only export of the live schema, for comparing against these files. |
 | `tools/audit-before-hardening.sql` | Read-only check to run before the hardening migration. |
 

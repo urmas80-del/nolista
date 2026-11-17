@@ -38,6 +38,16 @@ type Board = {
   owner_id: string;
 };
 
+function toTask(row: Record<string, any>): Task {
+  return {
+    id: row.id,
+    title: row.title,
+    is_done: row.is_done,
+    due_date: row.due_date ?? null,
+    recurrence_rule: row.recurrence_rule ?? null,
+  };
+}
+
 function formatDueDate(dateStr: string | null) {
   if (!dateStr) return null;
   const d = new Date(dateStr + 'T00:00:00');
@@ -75,7 +85,53 @@ export default function TaskListScreen({
   useEffect(() => {
     loadTasks();
     supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
-  }, []);
+
+    // Live updates: changes made by anyone sharing this board.
+    // Our own changes come back here too; upsertTask/removeTask are idempotent.
+    const channel = supabase
+      .channel(`tasks:${board.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'tasks', filter: `sheet_id=eq.${board.id}` },
+        (payload) => upsertTask(toTask(payload.new))
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'tasks', filter: `sheet_id=eq.${board.id}` },
+        (payload) => upsertTask(toTask(payload.new))
+      )
+      // Filters don't apply to DELETE events, so this receives deletes from
+      // every board; removing an id that isn't in this list is a no-op.
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'tasks' },
+        (payload) => {
+          const id = (payload.old as { id?: string }).id;
+          if (id) removeTask(id);
+        }
+      )
+      .subscribe((status) => {
+        // Fires on first connect and after every reconnect (e.g. app back
+        // from background). Refetch quietly to pick up anything missed.
+        if (status === 'SUBSCRIBED') loadTasks(false);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [board.id]);
+
+  function upsertTask(row: Task) {
+    setTasks((current) =>
+      current.some((t) => t.id === row.id)
+        ? current.map((t) => (t.id === row.id ? row : t))
+        : [...current, row]
+    );
+  }
+
+  function removeTask(id: string) {
+    setTasks((current) => current.filter((t) => t.id !== id));
+  }
 
   useEffect(() => {
     const text = newTitle.trim();
@@ -118,8 +174,8 @@ export default function TaskListScreen({
     }
   }
 
-  async function loadTasks() {
-    setLoading(true);
+  async function loadTasks(showSpinner = true) {
+    if (showSpinner) setLoading(true);
     const { data, error } = await supabase
       .from('tasks')
       .select('id, title, is_done, due_date, recurrence_rule')
@@ -128,9 +184,9 @@ export default function TaskListScreen({
 
     if (error) {
       console.log('loadTasks error:', error.message);
+    } else {
+      setTasks(data ?? []);
     }
-
-    setTasks(data ?? []);
     setLoading(false);
   }
 
@@ -160,24 +216,28 @@ export default function TaskListScreen({
     }
 
     if (data) {
-      setTasks((current) => [...current, data]);
+      upsertTask(data);
     }
   }
 
   async function toggleTask(task: Task) {
-    setTasks((current) =>
-      current.map((t) => (t.id === task.id ? { ...t, is_done: !t.is_done } : t))
-    );
+    upsertTask({ ...task, is_done: !task.is_done });
     const { error } = await supabase
       .from('tasks')
       .update({ is_done: !task.is_done })
       .eq('id', task.id);
 
     if (error) {
-      console.log('toggleTask error:', error.message);
+      upsertTask(task); // roll back the optimistic tick
+      Alert.alert('Could not update item', friendlyError(error));
+      return;
     }
 
-    loadTasks();
+    // Completing a recurring task makes the database reset it or add the next
+    // one. Realtime delivers that too; the refetch covers a dropped connection.
+    if (task.recurrence_rule && !task.is_done) {
+      loadTasks(false);
+    }
   }
 
   function confirmDelete(task: Task) {
