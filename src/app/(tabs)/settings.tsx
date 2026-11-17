@@ -4,7 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ACCENTS } from '@/constants/boards';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../../lib/supabase';
 
 type Board = {
   id: string;

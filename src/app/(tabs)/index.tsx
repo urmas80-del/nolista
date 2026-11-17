@@ -1,13 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
 import { friendlyError } from '@/utils/errors';
-import { supabase } from '../../lib/supabase';
-import TaskListScreen from '@/components/task-list-screen';
+import { supabase } from '../../../lib/supabase';
 import CreateBoardModal from '@/components/create-board-modal';
-import PeopleScreen from '@/components/people-screen';
 
 type Board = {
   id: string;
@@ -29,19 +28,19 @@ type PendingInvite = {
 export default function Home() {
   const [boards, setBoards] = useState<Board[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedBoard, setSelectedBoard] = useState<Board | null>(null);
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [isPremium, setIsPremium] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [shareTarget, setShareTarget] = useState<Board | null>(null);
-  const [peopleOpen, setPeopleOpen] = useState(false);
-  const [myId, setMyId] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadBoards();
-    loadInvites();
-    loadProfile();
-  }, []);
+  // Runs on first show and every time you come back to Home (e.g. from a
+  // board), so counts and names stay current.
+  useFocusEffect(
+    useCallback(() => {
+      loadBoards();
+      loadInvites();
+      loadProfile();
+    }, [])
+  );
 
   async function loadProfile() {
     const { data: userData } = await supabase.auth.getUser();
@@ -54,8 +53,9 @@ export default function Home() {
     setIsPremium(data?.is_premium ?? false);
   }
 
+  // The spinner only shows on first load (initial state); refreshes on focus
+  // update the list in place.
   async function loadBoards() {
-    setLoading(true);
     const { data: sheets, error } = await supabase
       .from('task_sheets')
       .select('id, name, type, caching_enabled, owner_id')
@@ -148,27 +148,6 @@ export default function Home() {
     setCreateOpen(true);
   }
 
-  if (peopleOpen) {
-    return <PeopleScreen onBack={() => setPeopleOpen(false)} />;
-  }
-
-  if (selectedBoard) {
-    return (
-      <TaskListScreen
-        board={selectedBoard}
-        isPremium={isPremium}
-        onBack={() => {
-          setSelectedBoard(null);
-          loadBoards();
-        }}
-        onRenamed={(newName) => {
-          setSelectedBoard((prev) => (prev ? { ...prev, name: newName } : prev));
-          loadBoards();
-        }}
-      />
-    );
-  }
-
   if (loading) {
     return (
       <View style={styles.center}>
@@ -181,7 +160,7 @@ export default function Home() {
     <View style={styles.container}>
       <View style={styles.titleRow}>
   <Text style={styles.title}>Nolista</Text>
-  <Pressable onPress={() => setPeopleOpen(true)} hitSlop={10} style={{ marginLeft: 15 }}>
+  <Pressable onPress={() => router.push('/people')} hitSlop={10} style={{ marginLeft: 15 }}>
     <Ionicons name="people-circle-outline" size={40} color={Brand.colors.sprout} />
   </Pressable>
 </View>
@@ -211,7 +190,10 @@ export default function Home() {
           const accent = BOARD_ACCENTS[item.type] ?? BOARD_ACCENTS.custom;
           const icon = BOARD_ICONS[item.type] ?? BOARD_ICONS.custom;
           return (
-            <Pressable style={styles.card} onPress={() => setSelectedBoard(item)}>
+            <Pressable
+              style={styles.card}
+              onPress={() => router.push({ pathname: '/board/[id]', params: { id: item.id } })}
+            >
               <View style={[styles.iconCircle, { backgroundColor: accent.bg }]}>
                 <Ionicons name={icon as any} size={20} color={accent.text} />
               </View>
