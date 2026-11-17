@@ -3,6 +3,7 @@ import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator, Alert }
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
+import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../lib/supabase';
 import TaskListScreen from '@/components/task-list-screen';
 import CreateBoardModal from '@/components/create-board-modal';
@@ -112,7 +113,14 @@ export default function Home() {
 
   async function respondToInvite(invite: PendingInvite, accept: boolean) {
     if (!accept) {
-      await supabase.from('board_invites').update({ status: 'declined' }).eq('id', invite.id);
+      const { error } = await supabase
+        .from('board_invites')
+        .update({ status: 'declined' })
+        .eq('id', invite.id);
+      if (error) {
+        Alert.alert('Could not decline invite', friendlyError(error));
+        return;
+      }
       setPendingInvites((current) => current.filter((i) => i.id !== invite.id));
       return;
     }
@@ -123,7 +131,8 @@ export default function Home() {
     });
 
     if (error) {
-      console.log('accept_board_invite error:', error.message);
+      Alert.alert('Could not join board', friendlyError(error));
+      loadInvites();
       return;
     }
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal, View, Text, TextInput, Pressable, StyleSheet, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
+import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../lib/supabase';
 
 type Collaborator = { user_id: string; email: string };
@@ -64,6 +65,15 @@ export default function ShareModal({
     setErrorMsg('');
 
     const { data: user } = await supabase.auth.getUser();
+    if (trimmed === user.user?.email?.toLowerCase()) {
+      setErrorMsg("That's your own email. You already have access to this board.");
+      return;
+    }
+    if (alreadyEmails.has(trimmed)) {
+      setErrorMsg('That person already has access or a pending invite.');
+      return;
+    }
+
     const { error } = await supabase.from('board_invites').insert({
       sheet_id: boardId,
       invited_email: trimmed,
@@ -71,7 +81,7 @@ export default function ShareModal({
     });
 
     if (error) {
-      setErrorMsg(error.message);
+      setErrorMsg(friendlyError(error, 'invite'));
       return;
     }
 

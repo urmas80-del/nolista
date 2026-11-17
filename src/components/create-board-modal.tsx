@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal, View, Text, TextInput, Pressable, Switch, StyleSheet, Alert } from 'react-native';
 import { Brand } from '@/constants/brand';
+import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../lib/supabase';
 
 export default function CreateBoardModal({
@@ -32,7 +33,7 @@ export default function CreateBoardModal({
     setSaving(false);
 
     if (error) {
-      Alert.alert('Could not create board', error.message);
+      Alert.alert('Could not create board', friendlyError(error));
       return;
     }
 

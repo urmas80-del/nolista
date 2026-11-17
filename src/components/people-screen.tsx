@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Pressable, FlatList, TextInput, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
+import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../lib/supabase';
 
 type BoardOption = { id: string; name: string };
@@ -100,6 +101,10 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
       return;
     }
     const { data: userData } = await supabase.auth.getUser();
+    if (email === userData.user?.email?.toLowerCase()) {
+      Alert.alert('Could not invite', "That's your own email.");
+      return;
+    }
     for (const sheetId of newBoardIds) {
       const { error } = await supabase.from('board_invites').insert({
         sheet_id: sheetId,
@@ -107,7 +112,9 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
         invited_by: userData.user?.id,
       });
       if (error) {
-        Alert.alert('Could not invite', error.message);
+        const boardName = myBoards.find((b) => b.id === sheetId)?.name ?? 'a board';
+        Alert.alert(`Could not invite to ${boardName}`, friendlyError(error, 'invite'));
+        load();
         return;
       }
     }
@@ -125,7 +132,7 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
       invited_by: userData.user?.id,
     });
     if (error) {
-      Alert.alert('Could not share', error.message);
+      Alert.alert('Could not share', friendlyError(error, 'invite'));
       return;
     }
     setPickerFor(null);

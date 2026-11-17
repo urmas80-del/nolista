@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
 import ShareModal from '@/components/share-modal';
+import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../lib/supabase';
 
 type Task = {
@@ -154,8 +155,7 @@ export default function TaskListScreen({
     setPickerOpen(false);
 
     if (error) {
-      console.log('addTask error:', error.message);
-      Alert.alert('Could not add item', error.message);
+      Alert.alert('Could not add item', friendlyError(error));
       return;
     }
 
@@ -221,8 +221,7 @@ export default function TaskListScreen({
     const { error } = await supabase.from('task_sheets').update({ name: trimmed }).eq('id', board.id);
     setEditingName(false);
     if (error) {
-      console.log('saveName error:', error.message);
-      Alert.alert('Could not rename board', error.message);
+      Alert.alert('Could not rename board', friendlyError(error));
       return;
     }
     onRenamed(trimmed);
