@@ -9,14 +9,18 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
 import ShareModal from '@/components/share-modal';
 import { friendlyError } from '@/utils/errors';
 import { removeById, upsertById } from '@/utils/task-list';
+import { listAsText } from '@/utils/list-text';
+import { sharedWithLabel } from '@/utils/names';
 import { supabase } from '../../lib/supabase';
 
 type Task = {
@@ -33,12 +37,15 @@ type Suggestion = {
   use_count: number;
 };
 
+type SameTypeBoard = { id: string; owner_id: string; member_names: string[] | null };
+
 type Board = {
   id: string;
   name: string;
   type: string;
   caching_enabled?: boolean;
   owner_id: string;
+  member_names?: string[];
 };
 
 function toTask(row: Record<string, any>): Task {
@@ -63,11 +70,13 @@ export default function TaskListScreen({
   isPremium,
   onBack,
   onRenamed,
+  onGone,
 }: {
   board: Board;
   isPremium: boolean;
   onBack: () => void;
   onRenamed: (newName: string) => void;
+  onGone: () => void;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,6 +92,8 @@ export default function TaskListScreen({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(board.name);
   const [myId, setMyId] = useState<string | null>(null);
+  // Other Market/Together boards you have, for the merge options in the menu.
+  const [sameType, setSameType] = useState<SameTypeBoard[]>([]);
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -333,8 +344,145 @@ export default function TaskListScreen({
     }
   }
 
+  async function sendAsText() {
+    if (!isPremium) {
+      Alert.alert('Premium feature', 'Sending a list as text (WhatsApp, SMS…) is part of Nolista Premium.');
+      return;
+    }
+    try {
+      await Share.share({ message: listAsText(board, tasks) });
+    } catch (e) {
+      Alert.alert('Could not share', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const builtIn = board.type === 'market' || board.type === 'together';
+  const typeName = board.type === 'market' ? 'Market' : 'Together';
+
+  async function loadSameType() {
+    if (!builtIn) return;
+    const { data } = await supabase
+      .from('board_summaries')
+      .select('id, owner_id, member_names')
+      .eq('type', board.type)
+      .neq('id', board.id);
+    setSameType(data ?? []);
+  }
+
+  function toggleMenu() {
+    if (!menuOpen) loadSameType();
+    setMenuOpen(!menuOpen);
+  }
+
+  function openBoard(id: string) {
+    router.replace({ pathname: '/board/[id]', params: { id } });
+  }
+
+  // From your own board: fold it into a shared one you joined.
+  function confirmMergeInto(target: SameTypeBoard) {
+    setMenuOpen(false);
+    const owner = target.member_names?.[0] ?? 'the shared';
+    Alert.alert(
+      `Merge into ${owner}’s ${typeName}?`,
+      `Your items, suggestions and the people you shared this board with move there, ` +
+        `so everyone uses one list. You can unmerge later.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Merge',
+          onPress: async () => {
+            const { error } = await supabase.rpc('merge_into_board', { p_target: target.id });
+            if (error) {
+              Alert.alert('Could not merge', friendlyError(error));
+              return;
+            }
+            openBoard(target.id);
+          },
+        },
+      ]
+    );
+  }
+
+  function confirmUnmerge() {
+    setMenuOpen(false);
+    Alert.alert(
+      `Unmerge ${board.name}?`,
+      `You get your own ${typeName} back with your items, and the people you brought in when you ` +
+        `merged move back to it. You stay on this shared board too.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unmerge',
+          onPress: async () => {
+            const { data, error } = await supabase.rpc('unmerge_board', { p_board: board.id });
+            if (error) {
+              Alert.alert('Could not unmerge', friendlyError(error));
+              return;
+            }
+            if (data) openBoard(data as string);
+            else onGone();
+          },
+        },
+      ]
+    );
+  }
+
+  function confirmMerge() {
+    setMenuOpen(false);
+    Alert.alert(
+      `Merge your ${typeName} into this board?`,
+      `Your own ${typeName} items, suggestions and the people you shared it with move here, ` +
+        `so everyone uses one list. You can unmerge later.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Merge', onPress: mergeIntoThis },
+      ]
+    );
+  }
+
+  async function mergeIntoThis() {
+    const { error } = await supabase.rpc('merge_into_board', { p_target: board.id });
+    if (error) {
+      Alert.alert('Could not merge', friendlyError(error));
+      return;
+    }
+    loadTasks(false);
+    Alert.alert('Merged', 'Your items are on this board now.');
+  }
+
+  function confirmLeave() {
+    setMenuOpen(false);
+    Alert.alert(
+      `Leave ${board.name}?`,
+      builtIn
+        ? `You’ll keep your own ${board.name} with a copy of these items. Changes stop syncing with the others.`
+        : 'The board will disappear from your list. The owner can invite you again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Leave', style: 'destructive', onPress: leave },
+      ]
+    );
+  }
+
+  async function leave() {
+    const { error } = await supabase
+      .from('sheet_collaborators')
+      .delete()
+      .eq('sheet_id', board.id)
+      .eq('user_id', myId ?? '');
+    if (error) {
+      Alert.alert('Could not leave board', friendlyError(error));
+      return;
+    }
+    onGone();
+  }
+
   const doneCount = tasks.filter((t) => t.is_done).length;
   const isOwner = board.owner_id === myId;
+  const isMember = !isOwner && myId !== null;
+  const ownsSameType = sameType.some((b) => b.owner_id === myId);
+  const joinedSameType = sameType.filter((b) => b.owner_id !== myId);
+  const sharedLabel = sharedWithLabel(board.member_names);
 
   return (
     // Expo apps are edge-to-edge on Android, so the window doesn't resize for
@@ -348,7 +496,7 @@ export default function TaskListScreen({
           <Pressable onPress={onBack}>
             <Text style={styles.backText}>‹ Boards</Text>
           </Pressable>
-          <Pressable onPress={() => setMenuOpen((open) => !open)} hitSlop={10}>
+          <Pressable onPress={toggleMenu} hitSlop={10}>
             <Ionicons name="ellipsis-horizontal" size={20} color={Brand.colors.muted} />
           </Pressable>
         </View>
@@ -363,6 +511,30 @@ export default function TaskListScreen({
               <Pressable style={styles.dropdownItem} onPress={confirmClearList}>
                 <Text style={[styles.dropdownItemText, styles.dropdownItemDanger]}>Clear list</Text>
               </Pressable>
+              {builtIn &&
+                isOwner &&
+                joinedSameType.map((b) => (
+                  <Pressable key={b.id} style={styles.dropdownItem} onPress={() => confirmMergeInto(b)}>
+                    <Text style={styles.dropdownItemText}>
+                      Merge into {b.member_names?.[0] ?? 'shared'}’s {typeName}
+                    </Text>
+                  </Pressable>
+                ))}
+              {builtIn && isMember && ownsSameType && (
+                <Pressable style={styles.dropdownItem} onPress={confirmMerge}>
+                  <Text style={styles.dropdownItemText}>Merge my {typeName} here</Text>
+                </Pressable>
+              )}
+              {builtIn && isMember && !ownsSameType && (
+                <Pressable style={styles.dropdownItem} onPress={confirmUnmerge}>
+                  <Text style={styles.dropdownItemText}>Unmerge</Text>
+                </Pressable>
+              )}
+              {isMember && (!builtIn || ownsSameType) && (
+                <Pressable style={styles.dropdownItem} onPress={confirmLeave}>
+                  <Text style={[styles.dropdownItemText, styles.dropdownItemDanger]}>Leave board</Text>
+                </Pressable>
+              )}
             </View>
           </>
         )}
@@ -380,7 +552,7 @@ export default function TaskListScreen({
               color={BOARD_ACCENTS[board.type]?.text ?? BOARD_ACCENTS.custom.text}
             />
           </View>
-          <View>
+          <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {board.type === 'custom' && isOwner && editingName ? (
                 <>
@@ -403,15 +575,42 @@ export default function TaskListScreen({
                       <Ionicons name="pencil-outline" size={14} color={Brand.colors.muted} />
                     </Pressable>
                   )}
-                  {board.type !== 'focus' && isOwner && (
-                    <Pressable onPress={() => setShareOpen(true)} hitSlop={10}>
-                      <Ionicons name="share-social-outline" size={18} color={Brand.colors.sprout} />
-                    </Pressable>
-                  )}
                 </>
               )}
             </View>
+            {sharedLabel && (
+              <Text style={styles.shared} numberOfLines={1}>
+                {sharedLabel}
+              </Text>
+            )}
             <Text style={styles.count}>{doneCount} of {tasks.length} done</Text>
+          </View>
+          {/* Two different kinds of sharing:
+              person-add = invite people to the live board (owners only)
+              share     = send a text copy to WhatsApp, SMS… (Premium) */}
+          <View style={styles.headerActions}>
+            {board.type !== 'focus' && isOwner && (
+              <Pressable
+                onPress={() => setShareOpen(true)}
+                hitSlop={8}
+                style={styles.headerAction}
+                accessibilityLabel="Invite people"
+              >
+                <Ionicons name="person-add-outline" size={20} color={Brand.colors.sprout} />
+              </Pressable>
+            )}
+            <Pressable
+              onPress={sendAsText}
+              hitSlop={8}
+              style={styles.headerAction}
+              accessibilityLabel="Send list as text"
+            >
+              <Ionicons
+                name="share-outline"
+                size={20}
+                color={isPremium ? Brand.colors.sprout : Brand.colors.muted}
+              />
+            </Pressable>
           </View>
         </View>
       </View>
@@ -534,7 +733,8 @@ export default function TaskListScreen({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Brand.colors.paper },
-  header: { paddingHorizontal: 22, marginBottom: 10, position: 'relative' },
+  // zIndex keeps the ⋯ menu above the list when it hangs below the header.
+  header: { paddingHorizontal: 22, marginBottom: 10, position: 'relative', zIndex: 10, elevation: 10 },
   headerTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -587,6 +787,16 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   count: { fontFamily: Brand.fonts.body, fontSize: 12, color: Brand.colors.muted, marginTop: 2 },
+  shared: { fontFamily: Brand.fonts.body, fontSize: 12.5, color: Brand.colors.sprout, marginTop: 2 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' },
+  headerAction: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   list: { paddingHorizontal: 22, paddingBottom: 20, gap: 4 },
   row: {
     flexDirection: 'row',

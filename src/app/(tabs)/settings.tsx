@@ -3,8 +3,9 @@ import { View, Text, Pressable, StyleSheet, Alert, ScrollView, ActivityIndicator
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
-import { BOARD_ACCENTS } from '@/constants/boards';
+import { BOARD_ACCENTS, sortBoards } from '@/constants/boards';
 import { friendlyError } from '@/utils/errors';
+import NameModal from '@/components/name-modal';
 import { supabase } from '../../../lib/supabase';
 
 type Board = {
@@ -20,6 +21,8 @@ export default function Settings() {
   const [myId, setMyId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [myName, setMyName] = useState<string | null>(null);
+  const [nameOpen, setNameOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -30,6 +33,14 @@ export default function Settings() {
   async function loadBoards() {
     const { data: userData } = await supabase.auth.getUser();
     setMyId(userData.user?.id ?? null);
+    if (userData.user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('display_name')
+        .eq('id', userData.user.id)
+        .maybeSingle();
+      setMyName(profile?.display_name ?? null);
+    }
 
     const { data, error } = await supabase
       .from('board_summaries')
@@ -141,7 +152,7 @@ export default function Settings() {
       {!pickerOpen ? (
         <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 40 }}>
           <Text style={styles.sectionLabel}>Sharing & collaborators</Text>
-          {boards.map((board) => {
+          {sortBoards(boards, myId).map((board) => {
             const accent = BOARD_ACCENTS[board.type] ?? BOARD_ACCENTS.custom;
             const isOwnedByMe = board.owner_id === myId;
             const isCustom = board.type === 'custom';
@@ -168,6 +179,12 @@ export default function Settings() {
           </Pressable>
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Account</Text>
+          <Pressable style={styles.row} onPress={() => setNameOpen(true)}>
+            <Ionicons name="person-outline" size={16} color={Brand.colors.ink} style={{ marginRight: 12 }} />
+            <Text style={styles.rowLabel}>Your name</Text>
+            <Text style={[styles.rowMeta, { marginRight: 8 }]}>{myName ?? 'Not set'}</Text>
+            <Ionicons name="chevron-forward" size={16} color={Brand.colors.muted} />
+          </Pressable>
           <Pressable style={styles.row} onPress={signOut}>
             <Ionicons name="log-out-outline" size={16} color={Brand.colors.danger} style={{ marginRight: 12 }} />
             <Text style={[styles.rowLabel, { color: Brand.colors.danger }]}>Sign out</Text>
@@ -198,6 +215,16 @@ export default function Settings() {
           )}
         </View>
       )}
+      <NameModal
+        visible={nameOpen}
+        initialName={myName}
+        title="Your name"
+        onClose={() => setNameOpen(false)}
+        onSaved={(name) => {
+          setMyName(name);
+          setNameOpen(false);
+        }}
+      />
     </View>
   );
 }

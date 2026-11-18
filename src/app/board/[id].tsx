@@ -11,6 +11,7 @@ type Board = {
   type: string;
   caching_enabled: boolean;
   owner_id: string;
+  member_names: string[];
 };
 
 export default function BoardRoute() {
@@ -26,8 +27,8 @@ export default function BoardRoute() {
     async function load() {
       const [{ data: sheet }, { data: userData }] = await Promise.all([
         supabase
-          .from('task_sheets')
-          .select('id, name, type, caching_enabled, owner_id')
+          .from('board_summaries')
+          .select('id, name, type, caching_enabled, owner_id, member_names')
           .eq('id', id)
           .maybeSingle(),
         supabase.auth.getUser(),
@@ -52,7 +53,7 @@ export default function BoardRoute() {
       if (cancelled) return;
 
       setIsPremium(premium);
-      setBoard(sheet);
+      setBoard({ ...sheet, member_names: sheet.member_names ?? [] });
       setStatus('ready');
     }
 
@@ -93,6 +94,8 @@ export default function BoardRoute() {
       isPremium={isPremium}
       onBack={goBack}
       onRenamed={(newName) => setBoard((prev) => (prev ? { ...prev, name: newName } : prev))}
+      // Merging or leaving removes this board from your list.
+      onGone={() => router.replace('/')}
     />
   );
 }

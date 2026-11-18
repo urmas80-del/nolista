@@ -3,10 +3,15 @@ import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator, Alert }
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
-import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
+import { BOARD_ICONS, BOARD_ACCENTS, sortBoards } from '@/constants/boards';
 import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../../lib/supabase';
 import CreateBoardModal from '@/components/create-board-modal';
+import NameModal from '@/components/name-modal';
+import { personName, sharedWithLabel } from '@/utils/names';
+
+// "Not now" on the name prompt lasts until the app is closed.
+let namePromptDismissed = false;
 
 type Board = {
   id: string;
@@ -16,13 +21,14 @@ type Board = {
   owner_id: string;
   doneCount: number;
   totalCount: number;
+  memberNames: string[];
 };
 
 type PendingInvite = {
   id: string;
   sheet_id: string;
   task_sheets: { name: string; type: string } | null;
-  profiles: { email: string } | null;
+  profiles: { email: string; display_name: string | null } | null;
 };
 
 export default function Home() {
@@ -32,6 +38,8 @@ export default function Home() {
   const [isPremium, setIsPremium] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [myId, setMyId] = useState<string | null>(null);
+  const [nameOpen, setNameOpen] = useState(false);
 
   // Runs on first show and every time you come back to Home (e.g. from a
   // board), so counts and names stay current.
@@ -46,12 +54,15 @@ export default function Home() {
   async function loadProfile() {
     const { data: userData } = await supabase.auth.getUser();
     if (!userData.user) return;
+    setMyId(userData.user.id);
     const { data } = await supabase
       .from('profiles')
-      .select('is_premium')
+      .select('is_premium, display_name')
       .eq('id', userData.user.id)
       .single();
     setIsPremium(data?.is_premium ?? false);
+    // New users, and existing ones who never set a name, get asked once per app start.
+    if (data && !data.display_name && !namePromptDismissed) setNameOpen(true);
   }
 
   // The spinner only shows on first load (initial state); refreshes on focus
@@ -60,7 +71,7 @@ export default function Home() {
     // One request: boards you own or joined, with counts (board_summaries view).
     const { data, error } = await supabase
       .from('board_summaries')
-      .select('id, name, type, caching_enabled, owner_id, total_count, done_count')
+      .select('id, name, type, caching_enabled, owner_id, total_count, done_count, member_names')
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -77,6 +88,7 @@ export default function Home() {
           owner_id: b.owner_id,
           totalCount: b.total_count ?? 0,
           doneCount: b.done_count ?? 0,
+          memberNames: b.member_names ?? [],
         }))
       );
     }
@@ -90,7 +102,7 @@ export default function Home() {
 
     const { data, error } = await supabase
       .from('board_invites')
-      .select('id, sheet_id, task_sheets(name, type), profiles(email)')
+      .select('id, sheet_id, task_sheets(name, type), profiles(email, display_name)')
       .eq('invited_email', myEmail)
       .eq('status', 'pending');
 
@@ -101,7 +113,29 @@ export default function Home() {
     setPendingInvites((data as any) ?? []);
   }
 
-  async function respondToInvite(invite: PendingInvite, accept: boolean) {
+  // Accepting a Market/Together invite when you already have one with items:
+  // keep both, or fold yours into the shared one.
+  function acceptInvite(invite: PendingInvite) {
+    const type = invite.task_sheets?.type;
+    const own = boards.find((b) => b.owner_id === myId && b.type === type);
+    if (!own || own.totalCount === 0 || (type !== 'market' && type !== 'together')) {
+      respondToInvite(invite, true);
+      return;
+    }
+    const from = invite.profiles ? personName(invite.profiles) : 'their';
+    Alert.alert(
+      `Merge your ${own.name}?`,
+      `You already have a ${own.name} with ${own.totalCount} item${own.totalCount === 1 ? '' : 's'}. ` +
+        `Merge it into ${from}’s board so everyone shares one list, or keep both?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep both', onPress: () => respondToInvite(invite, true, false) },
+        { text: 'Merge', onPress: () => respondToInvite(invite, true, true) },
+      ]
+    );
+  }
+
+  async function respondToInvite(invite: PendingInvite, accept: boolean, merge = false) {
     if (!accept) {
       const { error } = await supabase
         .from('board_invites')
@@ -117,7 +151,7 @@ export default function Home() {
 
     const { error } = await supabase.rpc('accept_board_invite', {
       p_invite_id: invite.id,
-      p_merge: false,
+      p_merge: merge,
     });
 
     if (error) {
@@ -177,10 +211,10 @@ export default function Home() {
       {pendingInvites.map((invite) => (
         <View key={invite.id} style={styles.inviteBanner}>
           <Text style={styles.inviteText}>
-            {invite.profiles?.email ?? 'Someone'} invited you to {invite.task_sheets?.name ?? 'a board'}
+            {invite.profiles ? personName(invite.profiles) : 'Someone'} invited you to {invite.task_sheets?.name ?? 'a board'}
           </Text>
           <View style={styles.inviteActions}>
-            <Pressable style={styles.inviteAccept} onPress={() => respondToInvite(invite, true)}>
+            <Pressable style={styles.inviteAccept} onPress={() => acceptInvite(invite)}>
               <Text style={styles.inviteAcceptText}>Accept</Text>
             </Pressable>
             <Pressable style={styles.inviteDecline} onPress={() => respondToInvite(invite, false)}>
@@ -191,7 +225,7 @@ export default function Home() {
       ))}
 
       <FlatList
-        data={boards}
+        data={sortBoards(boards, myId)}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => {
@@ -207,6 +241,11 @@ export default function Home() {
               </View>
               <View style={styles.cardText}>
                 <Text style={styles.cardName}>{item.name}</Text>
+                {sharedWithLabel(item.memberNames) && (
+                  <Text style={styles.cardShared} numberOfLines={1}>
+                    {sharedWithLabel(item.memberNames)}
+                  </Text>
+                )}
               </View>
               <View style={[styles.chip, { backgroundColor: accent.bg }]}>
                 <Text style={[styles.chipText, { color: accent.text }]}>
@@ -225,6 +264,14 @@ export default function Home() {
       />
 
       <CreateBoardModal visible={createOpen} onClose={() => setCreateOpen(false)} onCreated={loadBoards} />
+      <NameModal
+        visible={nameOpen}
+        onClose={() => {
+          namePromptDismissed = true;
+          setNameOpen(false);
+        }}
+        onSaved={() => setNameOpen(false)}
+      />
     </View>
   );
 }
@@ -248,6 +295,7 @@ const styles = StyleSheet.create({
   iconCircle: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   cardText: { flex: 1 },
   cardName: { fontFamily: Brand.fonts.display, fontSize: 18, color: Brand.colors.ink },
+  cardShared: { fontFamily: Brand.fonts.body, fontSize: 12, color: Brand.colors.muted, marginTop: 2 },
   chip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
   chipText: { fontFamily: Brand.fonts.bodyBold, fontSize: 12 },
   inviteBanner: { backgroundColor: Brand.colors.marigoldTint, borderRadius: 14, padding: 14, marginBottom: 16 },

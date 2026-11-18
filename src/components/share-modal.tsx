@@ -5,7 +5,7 @@ import { Brand } from '@/constants/brand';
 import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../lib/supabase';
 
-type Collaborator = { user_id: string; email: string };
+type Collaborator = { user_id: string; email: string; name: string | null };
 type Invite = { id: string; invited_email: string };
 type KnownContact = { contact_email: string };
 
@@ -36,11 +36,15 @@ export default function ShareModal({
 
     const { data: collabData } = await supabase
       .from('sheet_collaborators')
-      .select('user_id, profiles(email)')
+      .select('user_id, profiles(email, display_name)')
       .eq('sheet_id', boardId);
 
     setCollaborators(
-      (collabData ?? []).map((c: any) => ({ user_id: c.user_id, email: c.profiles?.email ?? '?' }))
+      (collabData ?? []).map((c: any) => ({
+        user_id: c.user_id,
+        email: c.profiles?.email ?? '?',
+        name: c.profiles?.display_name ?? null,
+      }))
     );
 
     const { data: inviteData } = await supabase
@@ -115,7 +119,8 @@ export default function ShareModal({
         <Pressable onPress={onClose} style={styles.closeBtn}>
           <Text style={styles.closeText}>‹ Close</Text>
         </Pressable>
-        <Text style={styles.title}>Share {boardName}</Text>
+        <Text style={styles.title}>Invite people to {boardName}</Text>
+        <Text style={styles.emptyText}>They’ll see and edit the same live list.</Text>
 
         <Text style={styles.sectionLabel}>People with access</Text>
         <FlatList
@@ -124,7 +129,10 @@ export default function ShareModal({
           style={{ maxHeight: 120 }}
           renderItem={({ item }) => (
             <View style={styles.row}>
-              <Text style={styles.rowText}>{item.email}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowText}>{item.name ?? item.email}</Text>
+                {item.name && <Text style={styles.roleTag}>{item.email}</Text>}
+              </View>
               <Text style={styles.roleTag}>Editor</Text>
             </View>
           )}

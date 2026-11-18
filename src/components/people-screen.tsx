@@ -7,7 +7,7 @@ import { friendlyError } from '@/utils/errors';
 import { supabase } from '../../lib/supabase';
 
 type BoardOption = { id: string; name: string };
-type KnownUser = { email: string; boardIds: string[] };
+type KnownUser = { email: string; name: string | null; boardIds: string[] };
 
 export default function PeopleScreen({ onBack }: { onBack: () => void }) {
   const [knownUsers, setKnownUsers] = useState<KnownUser[]>([]);
@@ -48,12 +48,14 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
 
     const emails = (known ?? []).map((k) => k.contact_email);
     const { data: profilesData } = emails.length
-      ? await supabase.from('profiles').select('id, email').in('email', emails)
+      ? await supabase.from('profiles').select('id, email, display_name').in('email', emails)
       : { data: [] as any[] };
 
     const emailToId: Record<string, string> = {};
+    const emailToName: Record<string, string | null> = {};
     (profilesData ?? []).forEach((p: any) => {
       emailToId[p.email] = p.id;
+      emailToName[p.email] = p.display_name ?? null;
     });
 
     const result: KnownUser[] = (known ?? []).map((k) => {
@@ -61,7 +63,7 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
       const ids = uid
         ? (collaborators ?? []).filter((c: any) => c.user_id === uid).map((c: any) => c.sheet_id)
         : [];
-      return { email: k.contact_email, boardIds: ids };
+      return { email: k.contact_email, name: emailToName[k.contact_email] ?? null, boardIds: ids };
     });
 
     setKnownUsers(result);
@@ -169,7 +171,10 @@ export default function PeopleScreen({ onBack }: { onBack: () => void }) {
         renderItem={({ item }) => (
           <View style={styles.personCard}>
             <View style={styles.personRow}>
-              <Text style={styles.personEmail}>{item.email}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.personEmail}>{item.name ?? item.email}</Text>
+                {item.name && <Text style={styles.personSub}>{item.email}</Text>}
+              </View>
               <View style={styles.personActions}>
                 <Pressable onPress={() => setPickerFor(item.email)} hitSlop={10}>
                   <Ionicons name="add-circle-outline" size={20} color={Brand.colors.sprout} />
@@ -264,7 +269,8 @@ const styles = StyleSheet.create({
   subtitle: { fontFamily: Brand.fonts.body, fontSize: 12, color: Brand.colors.muted, marginTop: 4, marginBottom: 16 },
   personCard: { backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 10 },
   personRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  personEmail: { fontFamily: Brand.fonts.bodyBold, fontSize: 14, color: Brand.colors.ink, flex: 1 },
+  personEmail: { fontFamily: Brand.fonts.bodyBold, fontSize: 14, color: Brand.colors.ink },
+  personSub: { fontFamily: Brand.fonts.body, fontSize: 12, color: Brand.colors.muted, marginTop: 1 },
   personActions: { flexDirection: 'row', gap: 14 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   noBoardsText: { fontFamily: Brand.fonts.body, fontSize: 12, color: Brand.colors.muted },
