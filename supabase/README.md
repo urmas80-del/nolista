@@ -11,6 +11,7 @@ triggers) goes into a new migration file, never only into the dashboard.
 | `migrations/20261117000200_indexes.sql` | Indexes on foreign keys and invite lookups. |
 | `migrations/20261117000300_realtime_tasks.sql` | Publishes `tasks` to Realtime for live shared boards. |
 | `migrations/20261117000400_board_summaries.sql` | `board_summaries` view: board list with counts in one query. |
+| `migrations/20261118000000_delete_account.sql` | `delete_my_account()` RPC for in-app account deletion. |
 | `tools/inspect-schema.sql` | Read-only export of the live schema, for comparing against these files. |
 | `tools/audit-before-hardening.sql` | Read-only check to run before the hardening migration. |
 

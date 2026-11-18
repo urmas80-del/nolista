@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
@@ -18,6 +18,7 @@ type Board = {
 export default function Settings() {
   const [boards, setBoards] = useState<Board[]>([]);
   const [myId, setMyId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   useFocusEffect(
@@ -88,6 +89,49 @@ export default function Settings() {
     if (error) Alert.alert('Could not sign out', friendlyError(error));
   }
 
+  function confirmDeleteAccount() {
+    const sharedOwned = boards.filter((b) => b.owner_id === myId && b.collaborator_count > 0);
+    const sharedNote =
+      sharedOwned.length > 0
+        ? `\n\nThese boards are shared with others and will be deleted for them too: ${sharedOwned
+            .map((b) => b.name)
+            .join(', ')}.`
+        : '';
+
+    Alert.alert(
+      'Delete your account?',
+      'This permanently deletes your account, your boards and everything in them, ' +
+        'your suggestion history and your sharing circle. Items you added to other ' +
+        "people's boards stay on their lists." +
+        sharedNote,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert('This cannot be undone', 'Delete your Nolista account now?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete account', style: 'destructive', onPress: deleteAccount },
+            ]),
+        },
+      ]
+    );
+  }
+
+  async function deleteAccount() {
+    setDeleting(true);
+    const { error } = await supabase.rpc('delete_my_account');
+    if (error) {
+      setDeleting(false);
+      Alert.alert('Could not delete account', friendlyError(error));
+      return;
+    }
+    // The user no longer exists on the server, so only clear the local
+    // session. The root layout then shows the sign-in screen.
+    await supabase.auth.signOut({ scope: 'local' });
+  }
+
   const cacheableBoards = boards.filter((b) => b.type === 'market' || b.type === 'custom');
 
   return (
@@ -95,7 +139,7 @@ export default function Settings() {
       <Text style={styles.title}>Settings</Text>
 
       {!pickerOpen ? (
-        <View style={styles.list}>
+        <ScrollView style={styles.list} contentContainerStyle={{ paddingBottom: 40 }}>
           <Text style={styles.sectionLabel}>Sharing & collaborators</Text>
           {boards.map((board) => {
             const accent = BOARD_ACCENTS[board.type] ?? BOARD_ACCENTS.custom;
@@ -128,7 +172,14 @@ export default function Settings() {
             <Ionicons name="log-out-outline" size={16} color={Brand.colors.danger} style={{ marginRight: 12 }} />
             <Text style={[styles.rowLabel, { color: Brand.colors.danger }]}>Sign out</Text>
           </Pressable>
-        </View>
+          <Pressable style={styles.row} onPress={confirmDeleteAccount} disabled={deleting}>
+            <Ionicons name="person-remove-outline" size={16} color={Brand.colors.danger} style={{ marginRight: 12 }} />
+            <Text style={[styles.rowLabel, { color: Brand.colors.danger }]}>
+              {deleting ? 'Deleting account…' : 'Delete account'}
+            </Text>
+            {deleting && <ActivityIndicator color={Brand.colors.danger} />}
+          </Pressable>
+        </ScrollView>
       ) : (
         <View style={styles.list}>
           <Pressable onPress={() => setPickerOpen(false)} style={{ marginBottom: 16 }}>
