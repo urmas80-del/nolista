@@ -20,7 +20,9 @@ export default function AppTabs() {
   );
 }
 
-export function TabButton({ children, isFocused, ...props }: TabTriggerSlotProps) {
+// `ref` is dropped: expo-router types it for a View, which RN 0.88's strict
+// types won't accept on a Pressable, and the tab button doesn't need it.
+export function TabButton({ children, isFocused, ref: _ref, ...props }: TabTriggerSlotProps) {
   return (
     <Pressable {...props} style={({ pressed }) => pressed && styles.pressed}>
       <View style={[styles.tabButton, isFocused && styles.tabButtonActive]}>
