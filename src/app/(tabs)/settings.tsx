@@ -1,12 +1,37 @@
 import { useCallback, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Alert,
+  ScrollView,
+  ActivityIndicator,
+  Switch,
+  Platform,
+  Linking,
+} from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ACCENTS, sortBoards } from '@/constants/boards';
 import { friendlyError } from '@/utils/errors';
 import NameModal from '@/components/name-modal';
+import {
+  askForPermission,
+  getReminderSettings,
+  saveReminderSettings,
+  type ReminderSettings,
+} from '@/utils/reminders';
 import { supabase } from '../../../lib/supabase';
+
+const REMINDER_TIMES = [
+  { label: '8:00', hour: 8 },
+  { label: '9:00', hour: 9 },
+  { label: '12:00', hour: 12 },
+  { label: '18:00', hour: 18 },
+  { label: '20:00', hour: 20 },
+];
 
 type Board = {
   id: string;
@@ -23,12 +48,29 @@ export default function Settings() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [myName, setMyName] = useState<string | null>(null);
   const [nameOpen, setNameOpen] = useState(false);
+  const [reminders, setReminders] = useState<ReminderSettings | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       loadBoards();
+      getReminderSettings().then(setReminders);
     }, [])
   );
+
+  async function updateReminders(next: ReminderSettings) {
+    setReminders(next);
+    await saveReminderSettings(next);
+    if (next.enabled && !(await askForPermission())) {
+      Alert.alert(
+        'Notifications are off',
+        'Allow notifications for Nolista in your phone settings to get reminders.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open settings', onPress: () => Linking.openSettings() },
+        ]
+      );
+    }
+  }
 
   async function loadBoards() {
     const { data: userData } = await supabase.auth.getUser();
@@ -178,6 +220,39 @@ export default function Settings() {
             <Ionicons name="chevron-forward" size={16} color={Brand.colors.muted} />
           </Pressable>
 
+          {reminders && Platform.OS !== 'web' && (
+            <>
+              <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Reminders</Text>
+              <View style={styles.row}>
+                <Ionicons name="notifications-outline" size={16} color={Brand.colors.ink} style={{ marginRight: 12 }} />
+                <Text style={styles.rowLabel}>Remind me of due items</Text>
+                <Switch
+                  value={reminders.enabled}
+                  onValueChange={(enabled) => updateReminders({ ...reminders, enabled })}
+                  trackColor={{ true: Brand.colors.sprout }}
+                />
+              </View>
+              {reminders.enabled && (
+                <View style={styles.timeRow}>
+                  {REMINDER_TIMES.map((t) => {
+                    const active = reminders.hour === t.hour && reminders.minute === 0;
+                    return (
+                      <Pressable
+                        key={t.hour}
+                        style={[styles.timeChip, active && styles.timeChipActive]}
+                        onPress={() => updateReminders({ ...reminders, hour: t.hour, minute: 0 })}
+                      >
+                        <Text style={[styles.timeChipText, active && styles.timeChipTextActive]}>
+                          {t.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </>
+          )}
+
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Account</Text>
           <Pressable style={styles.row} onPress={() => setNameOpen(true)}>
             <Ionicons name="person-outline" size={16} color={Brand.colors.ink} style={{ marginRight: 12 }} />
@@ -247,6 +322,17 @@ const styles = StyleSheet.create({
     borderBottomColor: '#ECE9E2',
   },
   dot: { width: 9, height: 9, borderRadius: 5, marginRight: 12 },
+  timeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 12 },
+  timeChip: {
+    borderWidth: 1.2,
+    borderColor: '#E2DFD6',
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  timeChipActive: { backgroundColor: Brand.colors.sprout, borderColor: Brand.colors.sprout },
+  timeChipText: { fontFamily: Brand.fonts.bodyBold, fontSize: 13, color: Brand.colors.ink },
+  timeChipTextActive: { color: '#fff' },
   rowLabel: { flex: 1, fontFamily: Brand.fonts.body, fontSize: 15, color: Brand.colors.ink },
   rowMeta: { fontFamily: Brand.fonts.body, fontSize: 12, color: Brand.colors.muted },
   backText: { fontFamily: Brand.fonts.bodyBold, color: Brand.colors.sprout, fontSize: 15 },

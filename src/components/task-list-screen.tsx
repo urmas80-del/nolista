@@ -17,6 +17,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
 import ShareModal from '@/components/share-modal';
+import DueDatePicker from '@/components/due-date-picker';
+import { dueLabel, dueStatus, type DueStatus } from '@/utils/due-dates';
+import { onDueDateSet } from '@/utils/reminders';
 import { friendlyError } from '@/utils/errors';
 import { removeById, upsertById } from '@/utils/task-list';
 import { listAsText } from '@/utils/list-text';
@@ -58,11 +61,15 @@ function toTask(row: Record<string, any>): Task {
   };
 }
 
-function formatDueDate(dateStr: string | null) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr + 'T00:00:00');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[d.getMonth()]} ${d.getDate()}`;
+const DUE_COLORS: Record<DueStatus, string> = {
+  overdue: Brand.colors.danger,
+  today: Brand.colors.marigoldDark,
+  soon: Brand.colors.sproutDark,
+  later: Brand.colors.muted,
+};
+
+function dueColor(task: { is_done: boolean; due_date: string }) {
+  return task.is_done ? Brand.colors.muted : DUE_COLORS[dueStatus(task.due_date)];
 }
 
 export default function TaskListScreen({
@@ -92,6 +99,9 @@ export default function TaskListScreen({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(board.name);
   const [myId, setMyId] = useState<string | null>(null);
+  // Due date for the item being typed, and which date the picker is editing.
+  const [newDueDate, setNewDueDate] = useState<string | null>(null);
+  const [dateTarget, setDateTarget] = useState<'new' | Task | null>(null);
   // Other Market/Together boards you have, for the merge options in the menu.
   const [sameType, setSameType] = useState<SameTypeBoard[]>([]);
   const insets = useSafeAreaInsets();
@@ -220,12 +230,14 @@ export default function TaskListScreen({
         title,
         recurrence_rule: recurrenceRule,
         recurrence_strategy: recurrenceRule ? recurrenceStrategy : null,
+        due_date: newDueDate,
       })
       .select('id, title, is_done, due_date, recurrence_rule')
       .single();
 
     setRecurrenceRule(null);
     setPickerOpen(false);
+    setNewDueDate(null);
 
     if (error) {
       Alert.alert('Could not add item', friendlyError(error));
@@ -255,6 +267,24 @@ export default function TaskListScreen({
     if (task.recurrence_rule && !task.is_done) {
       loadTasks(false);
     }
+  }
+
+  async function setTaskDue(task: Task, due: string | null) {
+    if (task.due_date === due) return;
+    upsertTask({ ...task, due_date: due });
+    const { error } = await supabase.from('tasks').update({ due_date: due }).eq('id', task.id);
+    if (error) {
+      upsertTask(task); // roll back
+      Alert.alert('Could not set the date', friendlyError(error));
+    }
+  }
+
+  function onDatePicked(value: string | null) {
+    // First date ever: ask for notification permission (reminders are
+    // scheduled when the app goes to the background).
+    if (value) onDueDateSet();
+    if (dateTarget === 'new') setNewDueDate(value);
+    else if (dateTarget) setTaskDue(dateTarget, value);
   }
 
   function confirmDelete(task: Task) {
@@ -630,17 +660,45 @@ export default function TaskListScreen({
                   <Text style={[styles.taskName, item.is_done && styles.taskDone]}>
                     {item.title}
                   </Text>
-                  {item.recurrence_rule && (
+                  {(item.due_date || item.recurrence_rule) && (
                     <View style={styles.recurrenceTag}>
-                      <Ionicons name="repeat-outline" size={12} color={Brand.colors.sprout} />
-                      <Text style={styles.recurrenceTagText}>
-                        {item.recurrence_rule[0].toUpperCase() + item.recurrence_rule.slice(1)}
-                        {item.due_date ? ` · next ${formatDueDate(item.due_date)}` : ''}
-                      </Text>
+                      {item.due_date && (
+                        <Pressable onPress={() => setDateTarget(item)} hitSlop={6} style={styles.dueTag}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={12}
+                            color={dueColor({ ...item, due_date: item.due_date })}
+                          />
+                          <Text
+                            style={[styles.dueTagText, { color: dueColor({ ...item, due_date: item.due_date }) }]}
+                          >
+                            {!item.is_done && dueStatus(item.due_date) === 'overdue' ? 'Overdue · ' : ''}
+                            {dueLabel(item.due_date)}
+                          </Text>
+                        </Pressable>
+                      )}
+                      {item.recurrence_rule && (
+                        <>
+                          <Ionicons name="repeat-outline" size={12} color={Brand.colors.sprout} />
+                          <Text style={styles.recurrenceTagText}>
+                            {item.recurrence_rule[0].toUpperCase() + item.recurrence_rule.slice(1)}
+                          </Text>
+                        </>
+                      )}
                     </View>
                   )}
                 </View>
               </Pressable>
+              {!item.is_done && !item.due_date && (
+                <Pressable
+                  onPress={() => setDateTarget(item)}
+                  style={styles.deleteBtn}
+                  hitSlop={8}
+                  accessibilityLabel="Set due date"
+                >
+                  <Ionicons name="calendar-outline" size={17} color="#B9B6AC" />
+                </Pressable>
+              )}
               <Pressable onPress={() => confirmDelete(item)} style={styles.deleteBtn} hitSlop={10}>
                 <Ionicons name="trash-outline" size={17} color="#B9B6AC" />
               </Pressable>
@@ -699,8 +757,29 @@ export default function TaskListScreen({
         </View>
       )}
 
+      {newDueDate && (
+        <View style={styles.newDueRow}>
+          <Pressable style={styles.newDueChip} onPress={() => setDateTarget('new')}>
+            <Ionicons name="calendar-outline" size={13} color={DUE_COLORS[dueStatus(newDueDate)]} />
+            <Text style={[styles.dueTagText, { color: DUE_COLORS[dueStatus(newDueDate)] }]}>
+              Due {dueLabel(newDueDate)}
+            </Text>
+          </Pressable>
+          <Pressable onPress={() => setNewDueDate(null)} hitSlop={10} accessibilityLabel="Remove date">
+            <Ionicons name="close-circle" size={16} color={Brand.colors.muted} />
+          </Pressable>
+        </View>
+      )}
+
       {/* Keep the add row clear of the Android navigation bar / iOS home indicator. */}
       <View style={[styles.addRow, { paddingBottom: 16 + insets.bottom }]}>
+        <Pressable onPress={() => setDateTarget('new')} style={styles.repeatBtn} accessibilityLabel="Due date">
+          <Ionicons
+            name="calendar-outline"
+            size={20}
+            color={newDueDate ? Brand.colors.sprout : Brand.colors.muted}
+          />
+        </Pressable>
         <Pressable onPress={toggleRecurrencePicker} style={styles.repeatBtn}>
           <Ionicons
             name="repeat-outline"
@@ -720,6 +799,13 @@ export default function TaskListScreen({
           <Text style={styles.addBtnText}>Add</Text>
         </Pressable>
       </View>
+
+      <DueDatePicker
+        visible={dateTarget !== null}
+        value={dateTarget === 'new' ? newDueDate : (dateTarget?.due_date ?? null)}
+        onPick={onDatePicked}
+        onClose={() => setDateTarget(null)}
+      />
 
       <ShareModal
         visible={shareOpen}
@@ -818,6 +904,18 @@ const styles = StyleSheet.create({
   taskName: { fontFamily: Brand.fonts.body, fontSize: 15.5, color: Brand.colors.ink },
   taskDone: { color: '#B9B6AC', textDecorationLine: 'line-through' },
   recurrenceTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  dueTag: { flexDirection: 'row', alignItems: 'center', gap: 4, marginRight: 8 },
+  dueTagText: { fontFamily: Brand.fonts.bodyBold, fontSize: 11.5 },
+  newDueRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 22, paddingTop: 8 },
+  newDueChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+  },
   recurrenceTagText: { fontFamily: Brand.fonts.body, fontSize: 11.5, color: Brand.colors.sprout },
   deleteBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   suggestList: {

@@ -17,6 +17,13 @@ describe('listAsText', () => {
     expect(text).toBe('🛒 *Market*\nAll done!');
   });
 
+  it('adds due dates to open items', () => {
+    const text = listAsText(board, [{ title: 'Milk', is_done: false, due_date: '2026-11-21' }], {
+      today: new Date(2026, 10, 20),
+    });
+    expect(text).toBe('🛒 *Market*\n▫️ Milk · Tomorrow');
+  });
+
   it('uses a generic emoji for unknown types', () => {
     expect(listAsText({ name: 'Trip', type: 'other' }, [])).toBe('📝 *Trip*\nAll done!');
   });
