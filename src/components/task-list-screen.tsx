@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   Pressable,
-  FlatList,
   StyleSheet,
   ActivityIndicator,
   Alert,
@@ -14,6 +13,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import ReorderableList, {
+  useReorderableDrag,
+  type ReorderableListReorderEvent,
+} from 'react-native-reorderable-list';
 import { Brand } from '@/constants/brand';
 import { BOARD_ICONS, BOARD_ACCENTS } from '@/constants/boards';
 import ShareModal from '@/components/share-modal';
@@ -21,7 +24,7 @@ import DueDatePicker from '@/components/due-date-picker';
 import { dueLabel, dueStatus, type DueStatus } from '@/utils/due-dates';
 import { onDueDateSet } from '@/utils/reminders';
 import { friendlyError } from '@/utils/errors';
-import { removeById, upsertById } from '@/utils/task-list';
+import { moveItem, removeById, sortByPosition, upsertById } from '@/utils/task-list';
 import { listAsText } from '@/utils/list-text';
 import { sharedWithLabel } from '@/utils/names';
 import { supabase } from '../../lib/supabase';
@@ -32,7 +35,10 @@ type Task = {
   is_done: boolean;
   due_date: string | null;
   recurrence_rule: string | null;
+  position: number;
 };
+
+const TASK_COLUMNS = 'id, title, is_done, due_date, recurrence_rule, position';
 
 type Suggestion = {
   id: string;
@@ -58,6 +64,7 @@ function toTask(row: Record<string, any>): Task {
     is_done: row.is_done,
     due_date: row.due_date ?? null,
     recurrence_rule: row.recurrence_rule ?? null,
+    position: row.position ?? 0,
   };
 }
 
@@ -146,7 +153,7 @@ export default function TaskListScreen({
   }, [board.id]);
 
   function upsertTask(row: Task) {
-    setTasks((current) => upsertById(current, row));
+    setTasks((current) => sortByPosition(upsertById(current, row)));
   }
 
   function removeTask(id: string) {
@@ -202,9 +209,9 @@ export default function TaskListScreen({
     if (showSpinner) setLoading(true);
     const { data, error } = await supabase
       .from('tasks')
-      .select('id, title, is_done, due_date, recurrence_rule')
+      .select(TASK_COLUMNS)
       .eq('sheet_id', board.id)
-      .order('created_at', { ascending: true });
+      .order('position', { ascending: true });
 
     if (error) {
       // Silent refreshes keep the current list; a failed first load would
@@ -212,7 +219,7 @@ export default function TaskListScreen({
       if (showSpinner) Alert.alert('Could not load items', friendlyError(error));
       else console.log('loadTasks error:', error.message);
     } else {
-      setTasks(data ?? []);
+      setTasks(sortByPosition(data ?? []));
     }
     setLoading(false);
   }
@@ -232,7 +239,7 @@ export default function TaskListScreen({
         recurrence_strategy: recurrenceRule ? recurrenceStrategy : null,
         due_date: newDueDate,
       })
-      .select('id, title, is_done, due_date, recurrence_rule')
+      .select(TASK_COLUMNS)
       .single();
 
     setRecurrenceRule(null);
@@ -308,6 +315,22 @@ export default function TaskListScreen({
     if (error) {
       Alert.alert('Could not delete item', friendlyError(error));
       loadTasks(false); // put it back in its original position
+    }
+  }
+
+  // Drag and drop: save only the moved item (or, rarely, renumber the list).
+  async function onReorder({ from, to }: ReorderableListReorderEvent) {
+    if (from === to) return;
+    const { items, moved, renumber } = moveItem(tasks, from, to);
+    setTasks(items);
+    const changed = renumber ? items : [moved];
+    const results = await Promise.all(
+      changed.map((t) => supabase.from('tasks').update({ position: t.position }).eq('id', t.id))
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      Alert.alert('Could not move item', friendlyError(failed.error));
+      loadTasks(false); // back to the saved order
     }
   }
 
@@ -648,61 +671,18 @@ export default function TaskListScreen({
       {loading ? (
         <ActivityIndicator color="#4C7A5E" style={{ marginTop: 40 }} />
       ) : (
-        <FlatList
+        <ReorderableList
           data={tasks}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
+          onReorder={onReorder}
           renderItem={({ item }) => (
-            <View style={styles.row}>
-              <Pressable style={styles.rowMain} onPress={() => toggleTask(item)}>
-                <View style={[styles.checkbox, item.is_done && styles.checkboxChecked]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.taskName, item.is_done && styles.taskDone]}>
-                    {item.title}
-                  </Text>
-                  {(item.due_date || item.recurrence_rule) && (
-                    <View style={styles.recurrenceTag}>
-                      {item.due_date && (
-                        <Pressable onPress={() => setDateTarget(item)} hitSlop={6} style={styles.dueTag}>
-                          <Ionicons
-                            name="calendar-outline"
-                            size={12}
-                            color={dueColor({ ...item, due_date: item.due_date })}
-                          />
-                          <Text
-                            style={[styles.dueTagText, { color: dueColor({ ...item, due_date: item.due_date }) }]}
-                          >
-                            {!item.is_done && dueStatus(item.due_date) === 'overdue' ? 'Overdue · ' : ''}
-                            {dueLabel(item.due_date)}
-                          </Text>
-                        </Pressable>
-                      )}
-                      {item.recurrence_rule && (
-                        <>
-                          <Ionicons name="repeat-outline" size={12} color={Brand.colors.sprout} />
-                          <Text style={styles.recurrenceTagText}>
-                            {item.recurrence_rule[0].toUpperCase() + item.recurrence_rule.slice(1)}
-                          </Text>
-                        </>
-                      )}
-                    </View>
-                  )}
-                </View>
-              </Pressable>
-              {!item.is_done && !item.due_date && (
-                <Pressable
-                  onPress={() => setDateTarget(item)}
-                  style={styles.deleteBtn}
-                  hitSlop={8}
-                  accessibilityLabel="Set due date"
-                >
-                  <Ionicons name="calendar-outline" size={17} color="#B9B6AC" />
-                </Pressable>
-              )}
-              <Pressable onPress={() => confirmDelete(item)} style={styles.deleteBtn} hitSlop={10}>
-                <Ionicons name="trash-outline" size={17} color="#B9B6AC" />
-              </Pressable>
-            </View>
+            <TaskRow
+              item={item}
+              onToggle={toggleTask}
+              onPickDate={setDateTarget}
+              onDelete={confirmDelete}
+            />
           )}
         />
       )}
@@ -817,6 +797,84 @@ export default function TaskListScreen({
   );
 }
 
+/**
+ * One item. Drag it by the handle on the left, or by long-pressing the row
+ * (a quick tap still ticks it). Its own component because the drag hook
+ * only works inside a list item.
+ */
+function TaskRow({
+  item,
+  onToggle,
+  onPickDate,
+  onDelete,
+}: {
+  item: Task;
+  onToggle: (task: Task) => void;
+  onPickDate: (task: Task) => void;
+  onDelete: (task: Task) => void;
+}) {
+  const drag = useReorderableDrag();
+  const color = item.due_date ? dueColor({ ...item, due_date: item.due_date }) : undefined;
+
+  return (
+    <View style={styles.row}>
+      <Pressable
+        onPressIn={drag}
+        style={styles.dragHandle}
+        hitSlop={{ top: 8, bottom: 8, left: 10 }}
+        accessibilityLabel="Drag to reorder"
+      >
+        <Ionicons name="reorder-two" size={18} color="#CFCCC2" />
+      </Pressable>
+      <Pressable
+        style={styles.rowMain}
+        onPress={() => onToggle(item)}
+        onLongPress={drag}
+        delayLongPress={300}
+      >
+        <View style={[styles.checkbox, item.is_done && styles.checkboxChecked]} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.taskName, item.is_done && styles.taskDone]}>{item.title}</Text>
+          {(item.due_date || item.recurrence_rule) && (
+            <View style={styles.recurrenceTag}>
+              {item.due_date && (
+                <Pressable onPress={() => onPickDate(item)} hitSlop={6} style={styles.dueTag}>
+                  <Ionicons name="calendar-outline" size={12} color={color} />
+                  <Text style={[styles.dueTagText, { color }]}>
+                    {!item.is_done && dueStatus(item.due_date) === 'overdue' ? 'Overdue · ' : ''}
+                    {dueLabel(item.due_date)}
+                  </Text>
+                </Pressable>
+              )}
+              {item.recurrence_rule && (
+                <>
+                  <Ionicons name="repeat-outline" size={12} color={Brand.colors.sprout} />
+                  <Text style={styles.recurrenceTagText}>
+                    {item.recurrence_rule[0].toUpperCase() + item.recurrence_rule.slice(1)}
+                  </Text>
+                </>
+              )}
+            </View>
+          )}
+        </View>
+      </Pressable>
+      {!item.is_done && !item.due_date && (
+        <Pressable
+          onPress={() => onPickDate(item)}
+          style={styles.deleteBtn}
+          hitSlop={8}
+          accessibilityLabel="Set due date"
+        >
+          <Ionicons name="calendar-outline" size={17} color="#B9B6AC" />
+        </Pressable>
+      )}
+      <Pressable onPress={() => onDelete(item)} style={styles.deleteBtn} hitSlop={10}>
+        <Ionicons name="trash-outline" size={17} color="#B9B6AC" />
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Brand.colors.paper },
   // zIndex keeps the ⋯ menu above the list when it hangs below the header.
@@ -891,7 +949,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#ECE9E2',
+    // Opaque, so a dragged row hides the ones it passes over.
+    backgroundColor: Brand.colors.paper,
   },
+  dragHandle: { paddingRight: 8, paddingVertical: 4, marginLeft: -6 },
   rowMain: { flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1 },
   checkbox: {
     width: 22,

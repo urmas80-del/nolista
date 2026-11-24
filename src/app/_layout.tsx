@@ -4,6 +4,7 @@ import { DefaultTheme, Stack, ThemeProvider, router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import type { Session } from '@supabase/supabase-js';
 import { useFonts, Fraunces_500Medium, Fraunces_500Medium_Italic } from '@expo-google-fonts/fraunces';
 import { Karla_400Regular, Karla_700Bold } from '@expo-google-fonts/karla';
@@ -98,19 +99,22 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider value={theme}>
-      <StatusBar style="dark" />
-      {/* Screens draw their own headers; the Stack gives native push/back. */}
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Protected guard={signedIn}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="board/[id]" />
-          <Stack.Screen name="people" />
-        </Stack.Protected>
-        <Stack.Protected guard={!signedIn}>
-          <Stack.Screen name="sign-in" />
-        </Stack.Protected>
-      </Stack>
-    </ThemeProvider>
+    // Gesture root: needed for drag-to-reorder in lists.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider value={theme}>
+        <StatusBar style="dark" />
+        {/* Screens draw their own headers; the Stack gives native push/back. */}
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Protected guard={signedIn}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="board/[id]" />
+            <Stack.Screen name="people" />
+          </Stack.Protected>
+          <Stack.Protected guard={!signedIn}>
+            <Stack.Screen name="sign-in" />
+          </Stack.Protected>
+        </Stack>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

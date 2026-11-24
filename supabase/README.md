@@ -15,6 +15,7 @@ triggers) goes into a new migration file, never only into the dashboard.
 | `migrations/20261118000100_names_merge_leave.sql` | Display names, `member_names` on `board_summaries`, merging and leaving Market/Together boards. |
 | `migrations/20261118000200_unmerge.sql` | `unmerge_board()`; `sheet_collaborators.added_by` records who a merge brought in. |
 | `migrations/20261119000000_unmerge_keeps_membership.sql` | Unmerge keeps you on the shared board and restores your own items (`tasks.merged_by`). |
+| `migrations/20261123000000_task_positions.sql` | Drag-to-reorder: `tasks.position`, new and moved items go to the end. |
 | `tools/inspect-schema.sql` | Read-only export of the live schema, for comparing against these files. |
 | `tools/audit-before-hardening.sql` | Read-only check to run before the hardening migration. |
 
